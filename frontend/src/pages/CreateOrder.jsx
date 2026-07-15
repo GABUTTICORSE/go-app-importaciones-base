@@ -190,7 +190,7 @@ export default function CreateOrder({ onSaveOrder, orders }) {
         const cif = productCLP + form.freight + form.insurance
 
         const totalCost =
-            cif + form.adValorem + form.customs + form.localExpenses
+            productCLP + form.freight + form.insurance + form.adValorem + form.customs + form.localExpenses
 
         return {
             productOriginValue: productsSubtotal,
@@ -588,6 +588,7 @@ export default function CreateOrder({ onSaveOrder, orders }) {
                         value={formatCLP(totals.productCLP)}
                     />
 
+                    <SummaryRow label="Flete CLP" value={formatCLP(form.freight)} />
                     <SummaryRow label="CIF" value={formatCLP(totals.cif)} />
                     <SummaryRow label="Ad Valorem" value={formatCLP(form.adValorem)} />
                     <SummaryRow label="Aduana" value={formatCLP(form.customs)} />
