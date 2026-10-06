@@ -4,6 +4,12 @@ import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 import { protect, optionalAuth } from '../middleware/auth.js'
 import { asyncHandler } from '../utils/asyncHandler.js'
+import {
+  clearFailures,
+  getLockMinutes,
+  loginKey,
+  registerFailure,
+} from '../utils/loginLimiter.js'
 
 const router = express.Router()
 
@@ -94,17 +100,36 @@ router.post(
       return res.status(400).json({ message: 'Email y contraseña son requeridos' })
     }
 
-    const user = await User.findOne({ email })
+    const key = loginKey(req, email)
+    const lockMinutes = getLockMinutes(key)
 
-    if (!user) {
-      return res.status(401).json({ message: 'Credenciales inválidas' })
+    if (lockMinutes > 0) {
+      return res.status(429).json({
+        message: `Demasiados intentos fallidos. Intenta de nuevo en ${lockMinutes} minuto${lockMinutes === 1 ? '' : 's'}.`,
+      })
     }
 
-    const isValidPassword = await bcrypt.compare(password, user.password)
+    const user = await User.findOne({ email })
+    const isValidPassword = user
+      ? await bcrypt.compare(password, user.password)
+      : false
 
     if (!isValidPassword) {
-      return res.status(401).json({ message: 'Credenciales inválidas' })
+      const remaining = registerFailure(key)
+
+      if (remaining === 0) {
+        return res.status(429).json({
+          message:
+            'Demasiados intentos fallidos. El acceso quedó bloqueado por 15 minutos.',
+        })
+      }
+
+      return res.status(401).json({
+        message: `Credenciales inválidas. Te quedan ${remaining} intento${remaining === 1 ? '' : 's'}.`,
+      })
     }
+
+    clearFailures(key)
 
     const token = jwt.sign(
       { id: user._id, email: user.email, role: user.role },
