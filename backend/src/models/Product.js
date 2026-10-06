@@ -2,8 +2,8 @@ import mongoose from 'mongoose'
 
 const productSchema = new mongoose.Schema(
   {
-    codigo_tipo: String,
-    codigo: { type: String, unique: true },
+    codigo_tipo: { type: String, unique: true },
+    codigo: { type: String, index: true },
     item_original: String,
     nombre_producto: String,
     modelo: String,

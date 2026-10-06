@@ -47,22 +47,33 @@ async function getOmpNews() {
   }
 }
 
+// Guarda las noticias en memoria 15 minutos para no descargarlas en cada visita
+const CACHE_MS = 15 * 60 * 1000
+let cache = { data: null, time: 0 }
+
 router.get('/', async (_req, res) => {
   try {
+    if (cache.data && Date.now() - cache.time < CACHE_MS) {
+      return res.json(cache.data)
+    }
+
     const ompNews = await getOmpNews()
 
-    const results = await Promise.all(
+    // allSettled: si una fuente falla, las demás igual se muestran
+    const results = await Promise.allSettled(
       feeds.map((feedUrl) => parser.parseURL(feedUrl))
     )
 
-    const motorsportNews = results.flatMap((feed) =>
-      feed.items.map((item) => ({
-        title: item.title,
-        link: item.link,
-        date: item.pubDate,
-        source: feed.title,
-      }))
-    )
+    const motorsportNews = results
+      .filter((result) => result.status === 'fulfilled')
+      .flatMap(({ value: feed }) =>
+        feed.items.map((item) => ({
+          title: item.title,
+          link: item.link,
+          date: item.pubDate,
+          source: feed.title,
+        }))
+      )
 
     // Primero OMP, luego Motorsport
     const news = [
@@ -72,9 +83,12 @@ router.get('/', async (_req, res) => {
         .slice(0, 20),
     ]
 
+    cache = { data: news, time: Date.now() }
     res.json(news)
   } catch (error) {
     console.error(error)
+    // Si hay noticias antiguas guardadas, se muestran antes que un error
+    if (cache.data) return res.json(cache.data)
     res.status(500).json({
       message: 'Error cargando noticias',
     })

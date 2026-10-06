@@ -1,5 +1,5 @@
 const API = import.meta.env.VITE_API_URL || '/api'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './styles.css'
 import {
   LayoutDashboard,
@@ -104,10 +104,6 @@ export default function App() {
   async function handleLogin(e) {
     e.preventDefault()
 
-    console.log('CLICK LOGIN')
-    console.log('Email:', loginEmail)
-    console.log('Password:', loginPassword)
-
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/auth/login`, {
         method: 'POST',
@@ -120,11 +116,7 @@ export default function App() {
         }),
       })
 
-      console.log('Status:', res.status)
-
       const data = await res.json()
-
-      console.log('Respuesta backend:', data)
 
       if (!res.ok) {
         setLoginError(data.message || 'Email o contraseña incorrectos')
@@ -153,9 +145,13 @@ export default function App() {
     e.preventDefault()
 
     try {
+      const token = localStorage.getItem('goapp_token')
       const res = await fetch(`${import.meta.env.VITE_API_URL || '/api'}/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({
           name: signupName,
           email: signupEmail,
@@ -179,6 +175,70 @@ export default function App() {
       alert('Cuenta creada. Ahora puedes iniciar sesión.')
     } catch {
       setSignupError('No se pudo conectar con el servidor')
+    }
+  }
+
+  // Llamada genérica a la API de operaciones con el token de sesión
+  async function operationsRequest(path, options = {}) {
+    const res = await fetch(`${API}/operations${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('goapp_token')}`,
+        ...(options.headers || {}),
+      },
+    })
+
+    if (res.status === 204) return null
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || 'Error al comunicarse con el servidor')
+    return data
+  }
+
+  // Busca el id de MongoDB de una orden a partir de su id interno
+  function findMongoId(orderId) {
+    const order = orders.find((o) => o.id === orderId || o._id === orderId)
+    return order?._id
+  }
+
+  async function updateOrder(updatedOrder) {
+    const mongoId = updatedOrder._id || findMongoId(updatedOrder.id)
+
+    if (!mongoId) {
+      alert('No se encontró la orden en el servidor. Recarga la página e inténtalo de nuevo.')
+      return
+    }
+
+    try {
+      const saved = await operationsRequest(`/${mongoId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updatedOrder),
+      })
+
+      setOrders((prev) =>
+        prev.map((order) => (order._id === mongoId ? saved : order))
+      )
+    } catch (error) {
+      console.error('Error actualizando orden:', error)
+      alert(`No se pudo guardar el cambio: ${error.message}`)
+    }
+  }
+
+  async function deleteOrder(orderId) {
+    const mongoId = findMongoId(orderId)
+
+    if (!mongoId) {
+      alert('No se encontró la orden en el servidor. Recarga la página e inténtalo de nuevo.')
+      return
+    }
+
+    try {
+      await operationsRequest(`/${mongoId}`, { method: 'DELETE' })
+      setOrders((prev) => prev.filter((order) => order._id !== mongoId))
+    } catch (error) {
+      console.error('Error eliminando orden:', error)
+      alert(`No se pudo eliminar la orden: ${error.message}`)
     }
   }
 
@@ -229,6 +289,44 @@ export default function App() {
   }
 
   const upcomingReminders = getUpcomingReminders()
+
+  // Recordatorios guardados en el servidor
+  const remindersLoaded = useRef(false)
+
+  useEffect(() => {
+    if (!logged) {
+      remindersLoaded.current = false
+      return
+    }
+
+    fetch(`${API}/reminders`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('goapp_token')}` },
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((items) => {
+        setReminders(Array.isArray(items) ? items : [])
+        remindersLoaded.current = true
+      })
+      .catch((error) => console.error('Error cargando recordatorios:', error))
+  }, [logged])
+
+  useEffect(() => {
+    // No guardar hasta haber cargado, para no borrar los recordatorios existentes
+    if (!logged || !remindersLoaded.current) return
+
+    const timer = setTimeout(() => {
+      fetch(`${API}/reminders`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('goapp_token')}`,
+        },
+        body: JSON.stringify({ items: reminders }),
+      }).catch((error) => console.error('Error guardando recordatorios:', error))
+    }, 500)
+
+    return () => clearTimeout(timer)
+  }, [reminders, logged])
 
   useEffect(() => {
     async function checkSession() {
@@ -479,6 +577,9 @@ export default function App() {
             setLogged(false)
             setCurrentUser(null)
             setLoginPassword('')
+            // Limpiar datos de la sesión para que no los vea el siguiente usuario
+            setOrders([])
+            setReminders([])
           }}
         >
           <LogOut size={16} />
@@ -560,16 +661,8 @@ export default function App() {
         {activePage === 'Ver órdenes' && (
           <OrdersList
             orders={orders}
-            onDeleteOrder={(orderId) => {
-              setOrders((prev) => prev.filter((order) => order.id !== orderId))
-            }}
-            onUpdateOrder={(updatedOrder) => {
-              setOrders((prev) =>
-                prev.map((order) =>
-                  order.id === updatedOrder.id ? updatedOrder : order
-                )
-              )
-            }}
+            onDeleteOrder={deleteOrder}
+            onUpdateOrder={updateOrder}
           />
         )}
         {activePage === 'Productos' && (

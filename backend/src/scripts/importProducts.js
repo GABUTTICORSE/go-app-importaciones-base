@@ -27,10 +27,10 @@ async function importProducts() {
     const sheetName = workbook.SheetNames[0]
     const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName])
 
-    const products = rows.map((row) => ({
+    const products = rows.filter((row) => row.codigo_tipo && row.codigo).map((row) => ({
       codigo_tipo: row.codigo_tipo,
       codigo: row.codigo,
-      item_original: row.item_original,
+      item_original: row.item_original ?? row.item,
       nombre_producto: row.nombre_producto,
       modelo: row.modelo,
       homologacion: row.homologacion,
@@ -44,7 +44,7 @@ async function importProducts() {
       activo: true,
     }))
 
-    await Product.deleteMany({})
+    await Product.collection.drop().catch(() => {});await Product.syncIndexes()
     await Product.insertMany(products)
 
     console.log(`Productos importados: ${products.length}`)
